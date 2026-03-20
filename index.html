@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gen 7 Battle Tracker & EV Reverse Engineer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        .slot-card { transition: all 0.2s ease-in-out; cursor: pointer; }
+        .slot-card:hover { transform: translateY(-2px); border-color: #3b82f6; }
+        .active-slot { border-color: #3b82f6; background-color: #1e3a8a40; box-shadow: 0 0 0 1px #3b82f6; }
+        .active-opp-slot { border-color: #ef4444; background-color: #7f1d1d40; box-shadow: 0 0 0 1px #ef4444; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 h-screen flex flex-col font-sans overflow-hidden">
+
+    <!-- Top Navigation / Controls -->
+    <header class="bg-gray-800 border-b border-gray-700 p-4 flex justify-between items-center shadow-md z-10 shrink-0">
+        <div>
+            <h1 class="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-red-400">Gen 7 Battle Tracker</h1>
+            <p class="text-xs text-gray-400">Multi-Roll EV Reverse Engineering Engine</p>
+        </div>
+        <div class="flex flex-wrap gap-2 md:gap-4 justify-end">
+            <button onclick="app.swapTeams()" class="bg-indigo-600/20 text-indigo-400 border border-indigo-600 hover:bg-indigo-600 hover:text-white px-4 py-2 rounded font-semibold text-sm transition-colors">Swap Teams</button>
+            <button onclick="app.resetBattle()" class="bg-yellow-600/20 text-yellow-500 border border-yellow-600 hover:bg-yellow-600 hover:text-white px-4 py-2 rounded font-semibold text-sm transition-colors">Reset Battle (Keep Teams)</button>
+            <button onclick="app.fullReset()" class="bg-red-600/20 text-red-500 border border-red-600 hover:bg-red-600 hover:text-white px-4 py-2 rounded font-semibold text-sm transition-colors">Full Reset</button>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="flex-grow flex overflow-hidden">
+        
+        <!-- LEFT COLUMN: USER TEAM -->
+        <div class="w-1/4 bg-gray-800/50 border-r border-gray-700 flex flex-col overflow-y-auto p-4 gap-3">
+            <div class="flex justify-between items-end border-b border-gray-700 pb-2 mb-1">
+                <h2 class="text-lg font-bold text-blue-400">Your Team</h2>
+                <button onclick="document.getElementById('importModal').classList.remove('hidden')" class="text-xs bg-blue-600/20 text-blue-400 border border-blue-600 hover:bg-blue-600 hover:text-white px-2 py-1 rounded transition-colors">Import Poképaste</button>
+            </div>
+            <div id="userTeamContainer" class="flex flex-col gap-3"></div>
+        </div>
+
+        <!-- CENTER COLUMN: ACTIVE EDITOR -->
+        <div class="w-2/4 bg-gray-900 flex flex-col overflow-y-auto p-6 relative">
+            <div id="centerPlaceholder" class="absolute inset-0 flex items-center justify-center text-gray-500 text-center p-10 flex-col gap-4">
+                <svg class="w-16 h-16 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <p class="text-lg">Select a Pokémon slot from the left or right to configure it or track battle interactions.</p>
+            </div>
+            <div id="userEditor" class="hidden flex-col gap-6"></div>
+            <div id="oppEditor" class="hidden flex-col gap-6"></div>
+        </div>
+
+        <!-- RIGHT COLUMN: OPPONENT TEAM -->
+        <div class="w-1/4 bg-gray-800/50 border-l border-gray-700 flex flex-col overflow-y-auto p-4 gap-3">
+            <h2 class="text-lg font-bold text-red-400 mb-1 border-b border-gray-700 pb-2">Opponent Team</h2>
+            <div id="oppTeamContainer" class="flex flex-col gap-3"></div>
+        </div>
+
+    </div>
+
+    <!-- POKEPASTE MODAL -->
+    <div id="importModal" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+        <div class="bg-gray-800 border border-gray-700 rounded-xl p-6 w-full max-w-2xl flex flex-col gap-4 shadow-2xl">
+            <div class="flex justify-between items-center">
+                <h3 class="text-xl font-bold text-blue-400">Import Poképaste</h3>
+                <button onclick="document.getElementById('importModal').classList.add('hidden')" class="text-gray-400 hover:text-white font-bold text-xl">✕</button>
+            </div>
+            <p class="text-sm text-gray-400">Paste your Showdown team here. It fully supports nicknames and automatically maps traditional Natures (like Adamant) into our +/- Stat interface.</p>
+            <textarea id="pasteInput" class="w-full h-64 bg-gray-900 border border-gray-600 rounded p-3 text-white font-mono text-sm focus:border-blue-500 outline-none" placeholder="Smaug (Charizard-Mega-X) (M) @ Charizardite X&#10;Ability: Tough Claws&#10;EVs: 252 Atk / 4 SpD / 252 Spe&#10;Jolly Nature&#10;- Flare Blitz&#10;- Dragon Claw&#10;- Roost&#10;- Dragon Dance"></textarea>
+            <button onclick="app.importTeam()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded mt-2 transition-colors">Import Team</button>
+        </div>
+    </div>
+
+    <!-- DATA & LOGIC -->
+    <script>
+        // Internal Nature mapping for precise math tracking
+        const natureMap = {
+            'Hardy': [1,1,1,1,1], 'Lonely': [1.1, 0.9, 1, 1, 1], 'Brave': [1.1, 1, 1, 1, 0.9], 'Adamant': [1.1, 1, 0.9, 1, 1], 'Naughty': [1.1, 1, 1, 0.9, 1],
+            'Bold': [0.9, 1.1, 1, 1, 1], 'Docile': [1,1,1,1,1], 'Relaxed': [1, 1.1, 1, 1, 0.9], 'Impish': [1, 1.1, 0.9, 1, 1], 'Lax': [1, 1.1, 1, 0.9, 1],
+            'Timid': [0.9, 1, 1, 1, 1.1], 'Hasty': [1, 0.9, 1, 1, 1.1], 'Serious': [1,1,1,1,1], 'Jolly': [1, 1, 0.9, 1, 1.1], 'Naive': [1, 1, 1, 0.9, 1.1],
+            'Modest': [0.9, 1, 1.1, 1, 1], 'Mild': [1, 0.9, 1.1, 1, 1], 'Quiet': [1, 1, 1.1, 1, 0.9], 'Bashful': [1,1,1,1,1], 'Rash': [1, 1, 1.1, 0.9, 1],
+            'Calm': [0.9, 1, 1, 1.1, 1], 'Gentle': [1, 0.9, 1, 1.1, 1], 'Sassy': [1, 1, 1, 1.1, 0.9], 'Careful': [1, 1, 0.9, 1.1, 1], 'Quirky': [1,1,1,1,1]
+        };
+
+        const plusClasses = ['+Atk', '+Def', '+SpA', '+SpD', '+Spe'];
+        const minusClasses = ['-Atk', '-Def', '-SpA', '-SpD', '-Spe'];
+        const idxToPlus = { 0: '+Atk', 1: '+Def', 2: '+SpA', 3: '+SpD', 4: '+Spe' };
+        const idxToMinus = { 0: '-Atk', 1: '-Def', 2: '-SpA', 3: '-SpD', 4: '-Spe' };
+
+        const pokedex = [];
+        const naturesList = Object.keys(natureMap);
+
+        // --- Core Math ---
+        function calcStat(base, ev, iv, natureMod, isHP, level) {
+            if (isHP) return Math.floor(((2 * base + iv + Math.floor(ev / 4)) * level) / 100) + level + 10;
+            return Math.floor((Math.floor(((2 * base + iv + Math.floor(ev / 4)) * level) / 100) + 5) * natureMod);
+        }
+
+        function getUserMods(plus, minus) {
+            let mods = [1, 1, 1, 1, 1];
+            let idxP = Object.values(idxToPlus).indexOf(plus);
+            let idxM = Object.values(idxToMinus).indexOf(minus);
+            if (idxP !== -1) mods[idxP] = 1.1;
+            if (idxM !== -1) mods[idxM] = 0.9;
+            if (idxP !== -1 && idxP === idxM) mods[idxP] = 1.0; 
+            return mods;
+        }
+
+        // --- Application State ---
+        const app = {
+            userTeam: Array(6).fill(null).map(() => ({ species: '', level: 100, naturePlus: 'None', natureMinus: 'None', evs: {hp:0, atk:0, def:0, spa:0, spd:0, spe:0}, ivs: {hp:31, atk:31, def:31, spa:31, spd:31, spe:31}, stats: {} })),
+            oppTeam: Array(6).fill(null).map(() => ({ 
+                species: '', level: 100, 
+                predictions: { naturePlus: 'Any', natureMinus: 'Any', hp: '', atk: '', def: '', spa: '', spd: '', spe: '' },
+                rolls: []
+            })),
+            activeSide: null, 
+            activeIndex: null,
+
+            async init() {
+                try {
+                    const response = await fetch('pokedex.csv');
+                    if (!response.ok) throw new Error('Failed to fetch pokedex.csv');
+                    
+                    const text = await response.text();
+                    const lines = text.split('\n');
+                    
+                    for(let i = 2; i < lines.length; i++) {
+                        if(!lines[i].trim()) continue;
+                        const cols = lines[i].split(',');
+                        if(cols.length < 17) continue; 
+                        pokedex.push({ 
+                            name: cols[8].trim(), 
+                            hp: parseInt(cols[11]), 
+                            atk: parseInt(cols[12]), 
+                            def: parseInt(cols[13]), 
+                            spa: parseInt(cols[14]), 
+                            spd: parseInt(cols[15]), 
+                            spe: parseInt(cols[16]) 
+                        });
+                    }
+                    this.renderAll();
+                } catch (error) {
+                    console.error("Error loading pokedex.csv:", error);
+                    alert("Could not load pokedex.csv. Please ensure the file is uploaded to your GitHub repository in the exact same directory as index.html.");
+                }
+            },
+
+            // --- POKEPASTE PARSER ---
+            importTeam() {
+                let paste = document.getElementById('pasteInput').value;
+                if(!paste.trim()) return;
+
+                let blocks = paste.split('\n\n').filter(b => b.trim());
+                let newTeam = Array(6).fill(null).map(() => ({ species: '', level: 100, naturePlus: 'None', natureMinus: 'None', evs: {hp:0, atk:0, def:0, spa:0, spd:0, spe:0}, ivs: {hp:31, atk:31, def:31, spa:31, spd:31, spe:31}, stats: {} }));
+
+                blocks.forEach((block, i) => {
+                    if (i >= 6) return;
+                    let lines = block.split('\n').map(l => l.trim());
+                    let mon = newTeam[i];
+
+                    // Name line parsing: Smaug (Charizard) (M) @ Item
+                    let firstLine = lines[0];
+                    let namePart = firstLine.split('@')[0].trim();
+                    namePart = namePart.replace(/ \([MF]\)$/, '').trim(); // Remove gender
+                    
+                    // Match text inside last parentheses for species if nickname exists
+                    let speciesMatch = namePart.match(/\(([^)]+)\)$/);
+                    let speciesStr = speciesMatch ? speciesMatch[1].trim() : namePart;
+                    
+                    let specificNature = 'Serious';
+
+                    for (let j = 1; j < lines.length; j++) {
+                        let line = lines[j];
+                        if (line.startsWith('Level:')) {
+                            mon.level = parseInt(line.split(':')[1].trim());
+                        } else if (line.startsWith('EVs:')) {
+                            let evParts = line.split(':')[1].split(',');
+                            evParts.forEach(ev => {
+                                let [val, stat] = ev.trim().split(' ');
+                                stat = stat.toLowerCase();
+                                if (['hp','atk','def','spa','spd','spe'].includes(stat)) mon.evs[stat] = parseInt(val);
+                            });
+                        } else if (line.startsWith('IVs:')) {
+                            let ivParts = line.split(':')[1].split(',');
+                            ivParts.forEach(iv => {
+                                let [val, stat] = iv.trim().split(' ');
+                                stat = stat.toLowerCase();
+                                if (['hp','atk','def','spa','spd','spe'].includes(stat)) mon.ivs[stat] = parseInt(val);
+                            });
+                        } else if (line.includes(' Nature')) {
+                            specificNature = line.split(' ')[0];
+                        }
+                    }
+
+                    // Map specific named nature to +/- Classes
+                    let mods = natureMap[specificNature] || natureMap['Serious'];
+                    let plusIdx = mods.findIndex(v => v === 1.1);
+                    let minusIdx = mods.findIndex(v => v === 0.9);
+                    
+                    mon.naturePlus = plusIdx !== -1 ? idxToPlus[plusIdx] : 'None';
+                    mon.natureMinus = minusIdx !== -1 ? idxToMinus[minusIdx] : 'None';
+
+                    // Resolve against internal Pokedex
+                    let base = pokedex.find(p => p.name.toLowerCase() === speciesStr.toLowerCase());
+                    if (base) {
+                        mon.species = base.name; 
+                        let finalMods = getUserMods(mon.naturePlus, mon.natureMinus);
+                        mon.stats.hp = calcStat(base.hp, mon.evs.hp, mon.ivs.hp, 1, true, mon.level);
+                        mon.stats.atk = calcStat(base.atk, mon.evs.atk, mon.ivs.atk, finalMods[0], false, mon.level);
+                        mon.stats.def = calcStat(base.def, mon.evs.def, mon.ivs.def, finalMods[1], false, mon.level);
+                        mon.stats.spa = calcStat(base.spa, mon.evs.spa, mon.ivs.spa, finalMods[2], false, mon.level);
+                        mon.stats.spd = calcStat(base.spd, mon.evs.spd, mon.ivs.spd, finalMods[3], false, mon.level);
+                        mon.stats.spe = calcStat(base.spe, mon.evs.spe, mon.ivs.spe, finalMods[4], false, mon.level);
+                    } else {
+                        mon.species = speciesStr; // Keeps whatever they pasted if it missed the DB
+                    }
+                });
+
+                this.userTeam = newTeam;
+                this.activeSide = null;
+                this.activeIndex = null;
+                document.getElementById('importModal').classList.add('hidden');
+                document.getElementById('pasteInput').value = ''; 
+                this.renderAll();
+            },
+
+            fullReset() {
+                if(!confirm("Erase entire tracker?")) return;
+                this.userTeam = Array(6).fill(null).map(() => ({ species: '', level: 100, naturePlus: 'None', natureMinus: 'None', evs: {hp:0, atk:0, def:0, spa:0, spd:0, spe:0}, ivs: {hp:31, atk:31, def:31, spa:31, spd:31, spe:31}, stats: {} }));
+                this.oppTeam = Array(6).fill(null).map(() => ({ species: '', level: 100, predictions: { naturePlus: 'Any', natureMinus: 'Any', hp: '', atk: '', def: '', spa: '', spd: '', spe: '' }, rolls: [] }));
+                this.activeSide = null; this.activeIndex = null;
+                this.renderAll();
+            },
+
+            resetBattle() {
+                if(!confirm("Clear damage memory and predictions? Teams will remain.")) return;
+                this.oppTeam.forEach(opp => {
+                    opp.predictions = { naturePlus: 'Any', natureMinus: 'Any', hp: '', atk: '', def: '', spa: '', spd: '', spe: '' };
+                    opp.rolls = [];
+                });
+                this.renderAll();
+            },
+
+            swapTeams() {
+                if(!confirm("Swap User and Opponent teams? This will clear battle memory and reset the tracker.")) return;
+                
+                const newUserTeam = this.oppTeam.map(opp => {
+                    let parseEv = (val) => val === '' || isNaN(parseInt(val)) ? 0 : parseInt(val);
+                    return {
+                        species: opp.species,
+                        level: opp.level,
+                        naturePlus: (opp.predictions.naturePlus && opp.predictions.naturePlus !== 'Any') ? opp.predictions.naturePlus : 'None',
+                        natureMinus: (opp.predictions.natureMinus && opp.predictions.natureMinus !== 'Any') ? opp.predictions.natureMinus : 'None',
+                        evs: {
+                            hp: parseEv(opp.predictions.hp), atk: parseEv(opp.predictions.atk), def: parseEv(opp.predictions.def),
+                            spa: parseEv(opp.predictions.spa), spd: parseEv(opp.predictions.spd), spe: parseEv(opp.predictions.spe)
+                        },
+                        ivs: {hp:31, atk:31, def:31, spa:31, spd:31, spe:31},
+                        stats: {}
+                    };
+                });
+
+                const newOppTeam = this.userTeam.map(user => {
+                    return {
+                        species: user.species,
+                        level: user.level,
+                        predictions: { naturePlus: 'Any', natureMinus: 'Any', hp: '', atk: '', def: '', spa: '', spd: '', spe: '' },
+                        rolls: []
+                    };
+                });
+
+                this.userTeam = newUserTeam;
+                this.oppTeam = newOppTeam;
+
+                this.userTeam.forEach(mon => {
+                    if(mon.species) {
+                        let base = pokedex.find(p => p.name === mon.species);
+                        if(base) {
+                            let mods = getUserMods(mon.naturePlus, mon.natureMinus);
+                            mon.stats.hp = calcStat(base.hp, mon.evs.hp, 31, 1, true, mon.level);
+                            mon.stats.atk = calcStat(base.atk, mon.evs.atk, 31, mods[0], false, mon.level);
+                            mon.stats.def = calcStat(base.def, mon.evs.def, 31, mods[1], false, mon.level);
+                            mon.stats.spa = calcStat(base.spa, mon.evs.spa, 31, mods[2], false, mon.level);
+                            mon.stats.spd = calcStat(base.spd, mon.evs.spd, 31, mods[3], false, mon.level);
+                            mon.stats.spe = calcStat(base.spe, mon.evs.spe, 31, mods[4], false, mon.level);
+                        }
+                    }
+                });
+
+                this.activeSide = null;
+                this.activeIndex = null;
+                this.renderAll();
+            },
+
+            selectSlot(side, index) {
+                this.activeSide = side;
+                this.activeIndex = index;
+                this.renderAll();
+            },
+
+            updateUserMon(field, value, subfield = null) {
+                let mon = this.userTeam[this.activeIndex];
+                if (subfield) mon[field][subfield] = value === '' ? 0 : parseInt(value);
+                else mon[field] = value;
+                
+                let base = pokedex.find(p => p.name === mon.species);
+                if (base) {
+                    let mods = getUserMods(mon.naturePlus, mon.natureMinus);
+                    mon.stats.hp = calcStat(base.hp, mon.evs.hp, mon.ivs.hp, 1, true, mon.level);
+                    mon.stats.atk = calcStat(base.atk, mon.evs.atk, mon.ivs.atk, mods[0], false, mon.level);
+                    mon.stats.def = calcStat(base.def, mon.evs.def, mon.ivs.def, mods[1], false, mon.level);
+                    mon.stats.spa = calcStat(base.spa, mon.evs.spa, mon.ivs.spa, mods[2], false, mon.level);
+                    mon.stats.spd = calcStat(base.spd, mon.evs.spd, mon.ivs.spd, mods[3], false, mon.level);
+                    mon.stats.spe = calcStat(base.spe, mon.evs.spe, mon.ivs.spe, mods[4], false, mon.level);
+                } else { mon.stats = {}; }
+                this.renderAll();
+            },
+
+            updateOppMon(field, value, subfield = null) {
+                let opp = this.oppTeam[this.activeIndex];
+                if (subfield) opp[field][subfield] = value;
+                else opp[field] = value;
+                this.renderAll();
+            },
+
+            addRoll(e) {
+                e.preventDefault();
+                let opp = this.oppTeam[this.activeIndex];
+                let form = e.target;
+                
+                let userSlot = parseInt(form.userSlot.value);
+                if (!this.userTeam[userSlot].species) { alert("Please select a configured User Pokémon."); return; }
+                
+                opp.rolls.push({
+                    id: Date.now(), role: form.calcRole.value, userSlot: userSlot,
+                    power: parseInt(form.power.value), multiplier: parseFloat(form.multiplier.value), pct: parseFloat(form.pct.value)
+                });
+                this.renderAll();
+            },
+
+            deleteRoll(id) {
+                let opp = this.oppTeam[this.activeIndex];
+                opp.rolls = opp.rolls.filter(r => r.id !== id);
+                this.renderAll();
+            },
+
+            // --- THE MEMORY ENGINE ---
+            evaluateOpponent(opp) {
+                if (!opp.species) return null;
+                let base = pokedex.find(p => p.name === opp.species);
+                if (!base) return null;
+
+                let allowedNatures = naturesList;
+                if (opp.predictions.naturePlus !== 'Any') {
+                    let pIdx = Object.values(idxToPlus).indexOf(opp.predictions.naturePlus);
+                    allowedNatures = allowedNatures.filter(n => natureMap[n][pIdx] === 1.1);
+                }
+                if (opp.predictions.natureMinus !== 'Any') {
+                    let mIdx = Object.values(idxToMinus).indexOf(opp.predictions.natureMinus);
+                    allowedNatures = allowedNatures.filter(n => natureMap[n][mIdx] === 0.9);
+                }
+
+                let getValidEVs = (predStr) => predStr === '' ? [...Array(64).keys()].map(i=>i*4) : [parseInt(predStr)];
+                
+                let evSpace = {
+                    hp: getValidEVs(opp.predictions.hp),
+                    atk: getValidEVs(opp.predictions.atk), def: getValidEVs(opp.predictions.def),
+                    spa: getValidEVs(opp.predictions.spa), spd: getValidEVs(opp.predictions.spd)
+                };
+
+                let pDefCombos = [], sDefCombos = [], pAtkCombos = [], sAtkCombos = [];
+
+                const runChecks = (roleMatch, getStatsFunc) => {
+                    let relevantRolls = opp.rolls.filter(r => r.role === roleMatch);
+                    if (relevantRolls.length === 0) return true;
+                    for (let r of relevantRolls) {
+                        let userMon = this.userTeam[r.userSlot];
+                        let { targetHp, targetDef, targetAtk } = getStatsFunc(r, userMon);
+                        
+                        if (roleMatch.startsWith('attacking')) {
+                            let K = Math.floor( (Math.floor(2*userMon.level/5)+2) * r.power * (roleMatch.includes('physical') ? userMon.stats.atk : userMon.stats.spa) / 50 );
+                            let minRaw = Math.max(1, Math.floor(targetHp * ((r.pct - 1) / 100)));
+                            let maxRaw = Math.max(1, Math.ceil(targetHp * ((r.pct + 1) / 100)));
+                            let baseDmg = Math.floor(K / targetDef) + 2;
+                            let minRoll = Math.floor(Math.floor(baseDmg * 0.85) * r.multiplier);
+                            let maxRoll = Math.floor(baseDmg * r.multiplier);
+                            if (!(maxRoll >= minRaw && minRoll <= maxRaw)) return false;
+                        } else {
+                            let K = Math.floor( (Math.floor(2*opp.level/5)+2) * r.power * targetAtk / 50 );
+                            let myDef = roleMatch.includes('physical') ? userMon.stats.def : userMon.stats.spd;
+                            let minRaw = Math.max(1, Math.floor(userMon.stats.hp * ((r.pct - 1) / 100)));
+                            let maxRaw = Math.max(1, Math.ceil(userMon.stats.hp * ((r.pct + 1) / 100)));
+                            let baseDmg = Math.floor(K / myDef) + 2;
+                            let minRoll = Math.floor(Math.floor(baseDmg * 0.85) * r.multiplier);
+                            let maxRoll = Math.floor(baseDmg * r.multiplier);
+                            if (!(maxRoll >= minRaw && minRoll <= maxRaw)) return false;
+                        }
+                    }
+                    return true;
+                };
+
+                // Generate Combos
+                for(let h of evSpace.hp) {
+                    let oppHp = calcStat(base.hp, h, 31, 1, true, opp.level);
+                    for(let d of evSpace.def) {
+                        for(let n of allowedNatures) {
+                            let oppDef = calcStat(base.def, d, 31, natureMap[n][1], false, opp.level);
+                            if(runChecks('attacking_physical', () => ({ targetHp: oppHp, targetDef: oppDef }))) pDefCombos.push({hpEv: h, defEv: d, nature: n});
+                        }
+                    }
+                    for(let s of evSpace.spd) {
+                        for(let n of allowedNatures) {
+                            let oppSpd = calcStat(base.spd, s, 31, natureMap[n][3], false, opp.level);
+                            if(runChecks('attacking_special', () => ({ targetHp: oppHp, targetDef: oppSpd }))) sDefCombos.push({hpEv: h, spdEv: s, nature: n});
+                        }
+                    }
+                }
+                for(let a of evSpace.atk) {
+                    for(let n of allowedNatures) {
+                        if(runChecks('defending_physical', () => ({ targetAtk: calcStat(base.atk, a, 31, natureMap[n][0], false, opp.level) }))) pAtkCombos.push({atkEv: a, nature: n});
+                    }
+                }
+                for(let s of evSpace.spa) {
+                    for(let n of allowedNatures) {
+                        if(runChecks('defending_special', () => ({ targetAtk: calcStat(base.spa, s, 31, natureMap[n][2], false, opp.level) }))) sAtkCombos.push({spaEv: s, nature: n});
+                    }
+                }
+
+                // CROSS VALIDATION
+                let hasPDef = opp.rolls.some(r => r.role === 'attacking_physical');
+                let hasSDef = opp.rolls.some(r => r.role === 'attacking_special');
+                let hasPAtk = opp.rolls.some(r => r.role === 'defending_physical');
+                let hasSAtk = opp.rolls.some(r => r.role === 'defending_special');
+
+                let validHpSet = new Set(evSpace.hp);
+                if (hasPDef) validHpSet = new Set([...validHpSet].filter(h => pDefCombos.some(c => c.hpEv === h)));
+                if (hasSDef) validHpSet = new Set([...validHpSet].filter(h => sDefCombos.some(c => c.hpEv === h)));
+                
+                let memoryConflict = validHpSet.size === 0 || (hasPAtk && pAtkCombos.length === 0) || (hasSAtk && sAtkCombos.length === 0);
+
+                pDefCombos = pDefCombos.filter(c => validHpSet.has(c.hpEv));
+                sDefCombos = sDefCombos.filter(c => validHpSet.has(c.hpEv));
+
+                // Find Guaranteed Natures
+                let finalNatures = new Set(allowedNatures);
+                if (hasPDef) finalNatures = new Set([...finalNatures].filter(n => pDefCombos.some(c => c.nature === n)));
+                if (hasSDef) finalNatures = new Set([...finalNatures].filter(n => sDefCombos.some(c => c.nature === n)));
+                if (hasPAtk) finalNatures = new Set([...finalNatures].filter(n => pAtkCombos.some(c => c.nature === n)));
+                if (hasSAtk) finalNatures = new Set([...finalNatures].filter(n => sAtkCombos.some(c => c.nature === n)));
+
+                let guaranteedPlus = 'None';
+                let guaranteedMinus = 'None';
+                if (finalNatures.size > 0 && finalNatures.size < 25) {
+                    for (let i = 0; i < 5; i++) {
+                        if ([...finalNatures].every(n => natureMap[n][i] === 1.1)) guaranteedPlus = idxToPlus[i];
+                        if ([...finalNatures].every(n => natureMap[n][i] === 0.9)) guaranteedMinus = idxToMinus[i];
+                    }
+                }
+
+                const extractBounds = (arr, key) => {
+                    if(arr.length === 0) return {min: '-', max: '-'};
+                    let vals = arr.map(c => c[key]);
+                    return { min: Math.min(...vals), max: Math.max(...vals) };
+                };
+
+                let bounds = {
+                    hp: extractBounds(pDefCombos.length ? pDefCombos : (sDefCombos.length ? sDefCombos : evSpace.hp.map(h=>({hpEv:h}))), 'hpEv'),
+                    def: extractBounds(pDefCombos, 'defEv'),
+                    spd: extractBounds(sDefCombos, 'spdEv'),
+                    atk: extractBounds(pAtkCombos, 'atkEv'),
+                    spa: extractBounds(sAtkCombos, 'spaEv')
+                };
+
+                let rollPredictions = opp.rolls.map(r => {
+                    let minPct = Infinity, maxPct = -Infinity;
+                    let userMon = this.userTeam[r.userSlot];
+                    
+                    if (r.role.startsWith('attacking')) {
+                        let combos = r.role.includes('physical') ? pDefCombos : sDefCombos;
+                        let statKey = r.role.includes('physical') ? 'defEv' : 'spdEv';
+                        let baseDef = r.role.includes('physical') ? base.def : base.spd;
+                        let natIdx = r.role.includes('physical') ? 1 : 3;
+                        let userOffStat = r.role.includes('physical') ? userMon.stats.atk : userMon.stats.spa;
+
+                        let K = Math.floor( (Math.floor(2*userMon.level/5)+2) * r.power * userOffStat / 50 );
+                        combos.forEach(c => {
+                            let oppHp = calcStat(base.hp, c.hpEv, 31, 1, true, opp.level);
+                            let oppDef = calcStat(baseDef, c[statKey], 31, natureMap[c.nature][natIdx], false, opp.level);
+                            let baseDmg = Math.floor(K / oppDef) + 2;
+                            let minRoll = Math.floor(Math.floor(baseDmg * 0.85) * r.multiplier);
+                            let maxRoll = Math.floor(baseDmg * r.multiplier);
+                            if(minRoll/oppHp * 100 < minPct) minPct = minRoll/oppHp * 100;
+                            if(maxRoll/oppHp * 100 > maxPct) maxPct = maxRoll/oppHp * 100;
+                        });
+                    } else {
+                        let combos = r.role.includes('physical') ? pAtkCombos : sAtkCombos;
+                        let statKey = r.role.includes('physical') ? 'atkEv' : 'spaEv';
+                        let baseOff = r.role.includes('physical') ? base.atk : base.spa;
+                        let natIdx = r.role.includes('physical') ? 0 : 2;
+                        let myDef = r.role.includes('physical') ? userMon.stats.def : userMon.stats.spd;
+
+                        combos.forEach(c => {
+                            let oppAtk = calcStat(baseOff, c[statKey], 31, natureMap[c.nature][natIdx], false, opp.level);
+                            let K = Math.floor( (Math.floor(2*opp.level/5)+2) * r.power * oppAtk / 50 );
+                            let baseDmg = Math.floor(K / myDef) + 2;
+                            let minRoll = Math.floor(Math.floor(baseDmg * 0.85) * r.multiplier);
+                            let maxRoll = Math.floor(baseDmg * r.multiplier);
+                            if(minRoll/userMon.stats.hp * 100 < minPct) minPct = minRoll/userMon.stats.hp * 100;
+                            if(maxRoll/userMon.stats.hp * 100 > maxPct) maxPct = maxRoll/userMon.stats.hp * 100;
+                        });
+                    }
+                    return { ...r, predictedMin: minPct === Infinity ? 0 : minPct, predictedMax: maxPct === -Infinity ? 0 : maxPct };
+                });
+
+                return { bounds, memoryConflict, rollPredictions, guaranteedPlus, guaranteedMinus };
+            },
+
+            // --- UI RENDERING ---
+            renderAll() {
+                this.renderTeamList('user');
+                this.renderTeamList('opp');
+                this.renderEditor();
+            },
+
+            renderTeamList(side) {
+                const team = side === 'user' ? this.userTeam : this.oppTeam;
+                const container = document.getElementById(side + 'TeamContainer');
+                container.innerHTML = '';
+                
+                team.forEach((mon, i) => {
+                    let isActive = this.activeSide === side && this.activeIndex === i;
+                    let card = document.createElement('div');
+                    card.className = `slot-card bg-gray-900 border border-gray-700 rounded p-3 flex flex-col gap-1 ${isActive ? (side==='user'?'active-slot':'active-opp-slot') : ''}`;
+                    card.onclick = () => this.selectSlot(side, i);
+                    
+                    if (!mon.species) {
+                        card.innerHTML = `<span class="text-gray-500 italic text-sm">Slot ${i+1} (Empty)</span>`;
+                    } else {
+                        card.innerHTML = `<span class="font-bold text-${side==='user'?'blue':'red'}-400">${mon.species}</span> <span class="text-xs text-gray-400">Lv. ${mon.level}</span>`;
+                        if (side === 'user') {
+                            card.innerHTML += `<div class="text-[10px] text-gray-500 mt-1 flex justify-between">
+                                <span>HP:${mon.stats.hp||0}</span> <span>A:${mon.stats.atk||0}</span> <span>D:${mon.stats.def||0}</span>
+                            </div><div class="text-[10px] text-gray-500 flex justify-between">
+                                <span>SpA:${mon.stats.spa||0}</span> <span>SpD:${mon.stats.spd||0}</span> <span>Spe:${mon.stats.spe||0}</span>
+                            </div>`;
+                        } else {
+                            card.innerHTML += `<div class="text-[10px] text-gray-500 mt-1">Rolls tracked: ${mon.rolls.length}</div>`;
+                        }
+                    }
+                    container.appendChild(card);
+                });
+            },
+
+            renderEditor() {
+                document.getElementById('centerPlaceholder').classList.add('hidden');
+                document.getElementById('userEditor').classList.add('hidden');
+                document.getElementById('oppEditor').classList.add('hidden');
+
+                if (this.activeSide === null) {
+                    document.getElementById('centerPlaceholder').classList.remove('hidden');
+                    return;
+                }
+
+                let datalistHTML = pokedex.map(p => `<option value="${p.name}">`).join('');
+
+                if (this.activeSide === 'user') {
+                    let mon = this.userTeam[this.activeIndex];
+                    let ed = document.getElementById('userEditor');
+                    ed.classList.remove('hidden');
+                    ed.classList.add('flex');
+                    
+                    ed.innerHTML = `
+                        <div class="border-b border-gray-700 pb-3">
+                            <h3 class="text-2xl font-bold text-blue-400">Configure User Slot ${this.activeIndex + 1}</h3>
+                            <p class="text-sm text-gray-400">Accurate stats are required to calculate damage bounds against the opponent.</p>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="col-span-2"><label class="block text-sm text-gray-400 mb-1">Species</label>
+                            <input list="dl_user" value="${mon.species}" onchange="app.updateUserMon('species', this.value)" class="w-full bg-gray-800 border border-gray-600 rounded p-2 focus:border-blue-500 outline-none text-white">
+                            <datalist id="dl_user">${datalistHTML}</datalist></div>
+                            
+                            <div class="col-span-2"><label class="block text-sm text-gray-400 mb-1">Level</label>
+                            <input type="number" value="${mon.level}" onchange="app.updateUserMon('level', this.value)" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white"></div>
+                            
+                            <div class="col-span-1"><label class="block text-sm text-gray-400 mb-1">Nature (+)</label>
+                            <select onchange="app.updateUserMon('naturePlus', this.value)" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white outline-none">
+                                <option value="None">None</option>
+                                ${plusClasses.map(n => `<option value="${n}" ${n === mon.naturePlus ? 'selected':''}>${n}</option>`).join('')}
+                            </select></div>
+
+                            <div class="col-span-1"><label class="block text-sm text-gray-400 mb-1">Nature (-) (Opt)</label>
+                            <select onchange="app.updateUserMon('natureMinus', this.value)" class="w-full bg-gray-800 border border-gray-600 rounded p-2 text-white outline-none">
+                                <option value="None">None</option>
+                                ${minusClasses.map(n => `<option value="${n}" ${n === mon.natureMinus ? 'selected':''}>${n}</option>`).join('')}
+                            </select></div>
+                        </div>
+
+                        <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                            <h4 class="font-bold text-gray-300 mb-3 border-b border-gray-700 pb-1">EV Investment & Final Stats</h4>
+                            <div class="grid grid-cols-3 gap-3">
+                                ${['hp','atk','def','spa','spd','spe'].map(stat => `
+                                <div class="bg-gray-900 border border-gray-700 rounded p-2 text-center">
+                                    <div class="text-xs text-gray-500 uppercase font-bold">${stat}</div>
+                                    <input type="number" min="0" max="252" step="4" value="${mon.evs[stat]}" onchange="app.updateUserMon('evs', this.value, '${stat}')" class="w-full bg-transparent text-center border-b border-gray-700 focus:border-blue-500 outline-none text-white my-1 text-sm" placeholder="EVs">
+                                    <div class="text-blue-300 font-bold">${mon.stats[stat] || '-'}</div>
+                                </div>`).join('')}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    let opp = this.oppTeam[this.activeIndex];
+                    let ed = document.getElementById('oppEditor');
+                    ed.classList.remove('hidden');
+                    ed.classList.add('flex');
+                    
+                    let analysis = this.evaluateOpponent(opp);
+                    let boundsHTML = '';
+                    let errorHTML = '';
+
+                    if (analysis) {
+                        if (analysis.memoryConflict) {
+                            errorHTML = `<div class="bg-red-900/50 border border-red-500 text-red-200 p-3 rounded mb-4 text-sm font-semibold">Conflict Error: The current prediction constraints make the recorded damage rolls mathematically impossible. Please adjust predictions or remove invalid rolls.</div>`;
+                        } else {
+                            let b = analysis.bounds;
+                            const fBound = (min, max) => min === max ? min : `${min} - ${max}`;
+                            boundsHTML = `
+                            <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-center">
+                                <div class="bg-gray-800 p-2 rounded border border-gray-700"><div class="text-[10px] text-gray-400 uppercase">HP EVs</div><div class="font-bold text-green-400">${fBound(b.hp.min, b.hp.max)}</div></div>
+                                <div class="bg-gray-800 p-2 rounded border border-gray-700"><div class="text-[10px] text-gray-400 uppercase">Atk EVs</div><div class="font-bold text-green-400">${fBound(b.atk.min, b.atk.max)}</div></div>
+                                <div class="bg-gray-800 p-2 rounded border border-gray-700"><div class="text-[10px] text-gray-400 uppercase">Def EVs</div><div class="font-bold text-green-400">${fBound(b.def.min, b.def.max)}</div></div>
+                                <div class="bg-gray-800 p-2 rounded border border-gray-700"><div class="text-[10px] text-gray-400 uppercase">SpA EVs</div><div class="font-bold text-green-400">${fBound(b.spa.min, b.spa.max)}</div></div>
+                                <div class="bg-gray-800 p-2 rounded border border-gray-700"><div class="text-[10px] text-gray-400 uppercase">SpD EVs</div><div class="font-bold text-green-400">${fBound(b.spd.min, b.spd.max)}</div></div>
+                            </div>
+                            <div class="mt-3 flex gap-4 text-sm bg-gray-800 p-2 border border-gray-700 rounded items-center">
+                                <span class="text-gray-400 uppercase text-[10px] font-bold tracking-wider">Guaranteed Natures:</span>
+                                <span class="font-bold text-blue-400">${analysis.guaranteedPlus !== 'None' ? analysis.guaranteedPlus : 'None'}</span>
+                                <span class="font-bold text-red-400">${analysis.guaranteedMinus !== 'None' ? analysis.guaranteedMinus : 'None'}</span>
+                            </div>`;
+                        }
+                    }
+
+                    // Rolls HTML
+                    let rollsHTML = opp.rolls.length === 0 ? '<p class="text-sm text-gray-500 italic">No battle interactions recorded yet.</p>' : opp.rolls.map((r, i) => {
+                        let fwd = analysis && analysis.rollPredictions ? analysis.rollPredictions[i] : null;
+                        let predStr = fwd ? `<span class="text-xs text-blue-300 ml-2">(Predicts: ${fwd.predictedMin.toFixed(1)}% - ${fwd.predictedMax.toFixed(1)}%)</span>` : '';
+                        let roleIcon = r.role.includes('attacking') ? '⚔️' : '🛡️';
+                        let uMonName = this.userTeam[r.userSlot].species || `Slot ${r.userSlot+1}`;
+                        return `
+                        <div class="flex justify-between items-center bg-gray-800 border border-gray-700 p-2 rounded text-sm">
+                            <div>${roleIcon} <b>${uMonName}</b> | BP: ${r.power} | M: ${r.multiplier} | <span class="text-green-400 font-bold">${r.pct}%</span> ${predStr}</div>
+                            <button onclick="app.deleteRoll(${r.id})" class="text-red-400 hover:text-red-300 px-2 font-bold">✕</button>
+                        </div>`;
+                    }).join('');
+
+                    ed.innerHTML = `
+                        <div class="border-b border-gray-700 pb-3 flex justify-between items-end">
+                            <div>
+                                <h3 class="text-2xl font-bold text-red-400">Track Opponent Slot ${this.activeIndex + 1}</h3>
+                                <div class="flex gap-4 mt-2">
+                                    <input list="dl_opp" value="${opp.species}" onchange="app.updateOppMon('species', this.value)" placeholder="Set Species..." class="bg-gray-800 border border-gray-600 rounded p-1.5 focus:border-red-500 outline-none text-white text-sm">
+                                    <datalist id="dl_opp">${datalistHTML}</datalist>
+                                    <input type="number" value="${opp.level}" onchange="app.updateOppMon('level', this.value)" placeholder="Level" class="w-16 bg-gray-800 border border-gray-600 rounded p-1.5 text-white text-sm">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Guaranteed Bounds -->
+                        <div class="bg-gray-900 p-4 rounded-lg border-2 border-red-900/50 shadow-lg">
+                            <h4 class="font-bold text-gray-300 mb-2 border-b border-gray-700 pb-1">Guaranteed EV Bounds (Refined from Memory)</h4>
+                            ${errorHTML}
+                            ${boundsHTML || '<p class="text-sm text-gray-500 italic">Select species to view initial bounds.</p>'}
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-6">
+                            <!-- Predictions -->
+                            <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                                <h4 class="font-bold text-gray-300 mb-3 border-b border-gray-700 pb-1">Predictions Constraint</h4>
+                                <div class="grid grid-cols-2 gap-2 text-sm">
+                                    <div class="col-span-1">
+                                        <select onchange="app.updateOppMon('predictions', this.value, 'naturePlus')" class="w-full bg-gray-900 border border-gray-600 rounded p-1.5 text-white outline-none">
+                                            <option value="Any">Nature (+): Any</option>
+                                            ${plusClasses.map(n => `<option value="${n}" ${n === opp.predictions.naturePlus ? 'selected':''}>Predict: ${n}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                    <div class="col-span-1">
+                                        <select onchange="app.updateOppMon('predictions', this.value, 'natureMinus')" class="w-full bg-gray-900 border border-gray-600 rounded p-1.5 text-white outline-none">
+                                            <option value="Any">Nature (-): Any</option>
+                                            ${minusClasses.map(n => `<option value="${n}" ${n === opp.predictions.natureMinus ? 'selected':''}>Predict: ${n}</option>`).join('')}
+                                        </select>
+                                    </div>
+                                    ${['hp','atk','def','spa','spd'].map(stat => `
+                                        <div>
+                                            <input type="number" min="0" max="252" step="4" placeholder="${stat.toUpperCase()} EV" value="${opp.predictions[stat]}" onchange="app.updateOppMon('predictions', this.value, '${stat}')" class="w-full bg-gray-900 border border-gray-600 rounded p-1.5 outline-none focus:border-red-500">
+                                        </div>
+                                    `).join('')}
+                                </div>
+                                <p class="text-[10px] text-gray-400 mt-2 leading-tight">Setting predictions locks those values in the engine, forcing all other bounds to narrow relative to your prediction.</p>
+                            </div>
+
+                            <!-- Add Roll -->
+                            <div class="bg-gray-800 p-4 rounded-lg border border-gray-700">
+                                <h4 class="font-bold text-gray-300 mb-3 border-b border-gray-700 pb-1">Log Interaction</h4>
+                                <form onsubmit="app.addRoll(event)" class="flex flex-col gap-2 text-sm">
+                                    <select name="userSlot" class="w-full bg-gray-900 border border-gray-600 rounded p-1.5 text-white outline-none">
+                                        <option value="" disabled selected>Select active User Mon...</option>
+                                        ${this.userTeam.map((m,i) => `<option value="${i}">${m.species || `Slot ${i+1}`} (Lv ${m.level})</option>`).join('')}
+                                    </select>
+                                    <select name="calcRole" class="w-full bg-gray-900 border border-gray-600 rounded p-1.5 text-white outline-none">
+                                        <option value="attacking_physical">User hit Opponent (Physical)</option>
+                                        <option value="attacking_special">User hit Opponent (Special)</option>
+                                        <option value="defending_physical">Opponent hit User (Physical)</option>
+                                        <option value="defending_special">Opponent hit User (Special)</option>
+                                    </select>
+                                    <div class="flex gap-2">
+                                        <input type="number" name="power" placeholder="Base Power" required min="1" class="w-1/3 bg-gray-900 border border-gray-600 rounded p-1.5 focus:border-red-500 outline-none">
+                                        <input type="number" name="multiplier" placeholder="Multiplier (e.g 1.5)" required step="0.1" min="0.1" class="w-1/3 bg-gray-900 border border-gray-600 rounded p-1.5 focus:border-red-500 outline-none">
+                                        <input type="number" name="pct" placeholder="Damage %" required step="0.1" min="0.1" max="100" class="w-1/3 bg-gray-900 border border-green-600 rounded p-1.5 focus:border-green-500 outline-none">
+                                    </div>
+                                    <button type="submit" class="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 rounded mt-1 transition-colors">Add Roll to Memory</button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <!-- Memory List -->
+                        <div class="bg-gray-900 p-4 rounded-lg border border-gray-700 flex-grow">
+                            <h4 class="font-bold text-gray-300 mb-2 border-b border-gray-700 pb-1">Battle Memory</h4>
+                            <div class="flex flex-col gap-2 max-h-48 overflow-y-auto pr-2">
+                                ${rollsHTML}
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+        };
+
+        // Boot
+        app.init();
+    </script>
+</body>
+</html>
