@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gen 7 Reverse Damage Calculator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom scrollbar for textareas and lists */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1f2937; }
+        ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col md:flex-row font-sans">
+
+    <!-- LEFT SIDEBAR: USER TEAM -->
+    <div class="w-full md:w-1/3 lg:w-1/4 bg-gray-800 border-r border-gray-700 p-6 flex flex-col gap-6 overflow-y-auto">
+        <div>
+            <h2 class="text-xl font-bold mb-4 text-blue-400">Your Team</h2>
+            <div class="grid grid-cols-2 gap-3" id="teamGrid">
+                <div class="bg-gray-900 border-2 border-gray-700 rounded-lg p-4 flex items-center justify-center text-sm text-gray-500 cursor-pointer hover:border-blue-500 transition-colors h-24 text-center" onclick="selectUserMon(0, this)">Slot 1</div>
+                <div class="bg-gray-900 border-2 border-gray-700 rounded-lg p-4 flex items-center justify-center text-sm text-gray-500 cursor-pointer hover:border-blue-500 transition-colors h-24 text-center" onclick="selectUserMon(1, this)">Slot 2</div>
+                <div class="bg-gray-900 border-2 border-gray-700 rounded-lg p-4 flex items-center justify-center text-sm text-gray-500 cursor-pointer hover:border-blue-500 transition-colors h-24 text-center" onclick="selectUserMon(2, this)">Slot 3</div>
+                <div class="bg-gray-900 border-2 border-gray-700 rounded-lg p-4 flex items-center justify-center text-sm text-gray-500 cursor-pointer hover:border-blue-500 transition-colors h-24 text-center" onclick="selectUserMon(3, this)">Slot 4</div>
+                <div class="bg-gray-900 border-2 border-gray-700 rounded-lg p-4 flex items-center justify-center text-sm text-gray-500 cursor-pointer hover:border-blue-500 transition-colors h-24 text-center" onclick="selectUserMon(4, this)">Slot 5</div>
+                <div class="bg-gray-900 border-2 border-gray-700 rounded-lg p-4 flex items-center justify-center text-sm text-gray-500 cursor-pointer hover:border-blue-500 transition-colors h-24 text-center" onclick="selectUserMon(5, this)">Slot 6</div>
+            </div>
+        </div>
+        
+        <div class="flex-grow flex flex-col">
+            <h3 class="text-lg font-semibold mb-2 text-gray-300">Import Poképaste</h3>
+            <textarea id="pasteInput" class="w-full flex-grow min-h-[200px] bg-gray-900 text-sm text-gray-300 border border-gray-600 rounded p-3 focus:outline-none focus:border-blue-500 resize-none" placeholder="Paste your Showdown team here..."></textarea>
+            <button onclick="importTeam()" class="mt-3 w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded transition-colors">Import Team</button>
+        </div>
+    </div>
+
+    <!-- MAIN CONTENT: CALCULATION INTERFACE -->
+    <div class="w-full md:w-2/3 lg:w-3/4 p-6 lg:p-10 flex flex-col gap-8 overflow-y-auto">
+        
+        <!-- Error/Message Box -->
+        <div id="messageBox" class="hidden w-full p-4 rounded bg-blue-900/50 border border-blue-500 text-blue-200 font-medium"></div>
+
+        <!-- Interface Section -->
+        <div class="bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-700">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-blue-400">1. Matchup Configuration</h2>
+                <span id="pokedexStatus" class="px-3 py-1 rounded text-sm font-semibold bg-yellow-900/50 text-yellow-500 border border-yellow-700">Loading Pokédex...</span>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Opponent Selection -->
+                <div class="flex flex-col gap-2">
+                    <label class="font-semibold text-gray-300">Opponent Pokémon:</label>
+                    <input list="pokedexList" id="opponentInput" placeholder="Type to search..." class="w-full bg-gray-900 border border-gray-600 rounded p-2 focus:outline-none focus:border-blue-500">
+                    <datalist id="pokedexList"></datalist>
+                </div>
+
+                <!-- Active Mon Display -->
+                <div class="flex flex-col gap-2">
+                    <label class="font-semibold text-gray-300">Active User Mon:</label>
+                    <input type="text" id="activeUserMon" readonly placeholder="Select from grid on the left" class="w-full bg-gray-900/50 border border-gray-700 text-gray-400 rounded p-2 cursor-not-allowed">
+                </div>
+
+                <!-- Combat Scenario -->
+                <div class="flex flex-col gap-2">
+                    <label class="font-semibold text-gray-300">Calculation Role:</label>
+                    <select id="roleSelect" class="w-full bg-gray-900 border border-gray-600 rounded p-2 focus:outline-none focus:border-blue-500">
+                        <option value="attacking_physical">I am Attacking (Physical Move)</option>
+                        <option value="attacking_special">I am Attacking (Special Move)</option>
+                        <option value="defending_physical">I am Defending (Physical Move)</option>
+                        <option value="defending_special">I am Defending (Special Move)</option>
+                    </select>
+                </div>
+
+                <!-- Move Details -->
+                <div class="flex flex-col gap-2">
+                    <label class="font-semibold text-gray-300">Move Base Power:</label>
+                    <input type="number" id="movePower" value="90" min="1" class="w-full bg-gray-900 border border-gray-600 rounded p-2 focus:outline-none focus:border-blue-500">
+                </div>
+
+                <!-- Modifiers -->
+                <div class="flex flex-col gap-2">
+                    <label class="font-semibold text-gray-300">Combined Modifiers (STAB x Weakness x Item):</label>
+                    <input type="number" id="multiplier" value="1.5" step="0.1" min="0.1" class="w-full bg-gray-900 border border-gray-600 rounded p-2 focus:outline-none focus:border-blue-500">
+                    <p class="text-xs text-gray-500">e.g., STAB (1.5) x Super Effective (2) = 3.0</p>
+                </div>
+
+                <!-- Damage Seen -->
+                <div class="flex flex-col gap-2">
+                    <label class="font-semibold text-gray-300">Damage Seen (%):</label>
+                    <input type="number" id="damageSeen" placeholder="e.g. 50" min="1" max="100" class="w-full bg-gray-900 border border-gray-600 rounded p-2 focus:outline-none focus:border-blue-500">
+                </div>
+            </div>
+
+            <div class="mt-8 flex justify-end">
+                <button onclick="runReverseCalc()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-8 rounded-lg shadow-lg transition-transform transform hover:scale-105">Reverse Engineer Bounds</button>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div class="bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-700">
+            <h2 class="text-2xl font-bold mb-4 text-green-400">2. Results (EV Spreads)</h2>
+            <div id="results" class="bg-gray-900 p-4 border border-gray-700 rounded-lg min-h-[150px] whitespace-pre-wrap font-mono text-sm text-gray-300 overflow-x-auto">Import your team and click calculate to see the exact possible EV bounds.</div>
+        </div>
+    </div>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        // Data State
+        let pokedex = [];
+        let userTeam = [];
+        let activeUserIndex = null;
+
+        // Auto-load CSV on init
+        window.onload = function() {
+            fetch('pokedex.csv')
+                .then(response => {
+                    if (!response.ok) throw new Error('pokedex.csv not found');
+                    return response.text();
+                })
+                .then(text => {
+                    parseCSV(text);
+                })
+                .catch(err => {
+                    const statusEl = document.getElementById('pokedexStatus');
+                    statusEl.className = "px-3 py-1 rounded text-sm font-semibold bg-red-900/50 text-red-500 border border-red-700";
+                    statusEl.innerText = "Error: pokedex.csv missing";
+                    showMessage("Could not automatically load pokedex.csv. Ensure the file is in the same directory as this HTML file.", true);
+                });
+        };
+
+        // UI Helpers
+        function showMessage(msg, isError = false) {
+            const box = document.getElementById('messageBox');
+            box.innerText = msg;
+            box.classList.remove('hidden');
+            if (isError) {
+                box.classList.replace('bg-blue-900/50', 'bg-red-900/50');
+                box.classList.replace('border-blue-500', 'border-red-500');
+                box.classList.replace('text-blue-200', 'text-red-200');
+            } else {
+                box.classList.replace('bg-red-900/50', 'bg-blue-900/50');
+                box.classList.replace('border-red-500', 'border-blue-500');
+                box.classList.replace('text-red-200', 'text-blue-200');
+            }
+        }
+
+        // Helper to strip punctuation/spaces for robust matching
+        function normalizeName(name) {
+            if(!name) return "";
+            return name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        }
+
+        // --- 1. CSV Parsing Logic ---
+        function parseCSV(text) {
+            try {
+                const lines = text.split('\n');
+                pokedex = [];
+                
+                // Skip row 0 (headers) and row 1 (dashes)
+                for(let i = 2; i < lines.length; i++) {
+                    if(!lines[i].trim()) continue;
+                    const cols = lines[i].split(',');
+                    
+                    // Verify it has enough columns to reach speed
+                    if(cols.length < 17) continue; 
+                    
+                    pokedex.push({
+                        rawName: cols[8].trim(),                   // Pokémon (e.g. "Mega Charizard X")
+                        searchKey1: normalizeName(cols[8]),        // "megacharizardx"
+                        searchKey2: normalizeName(cols[2]),        // "charizardmegax" (Smogon Name)
+                        hp: parseInt(cols[11]),
+                        atk: parseInt(cols[12]),
+                        def: parseInt(cols[13]),
+                        spa: parseInt(cols[14]),
+                        spd: parseInt(cols[15]),
+                        spe: parseInt(cols[16])
+                    });
+                }
+                
+                populateDatalist();
+                
+                const statusEl = document.getElementById('pokedexStatus');
+                statusEl.className = "px-3 py-1 rounded text-sm font-semibold bg-green-900/50 text-green-500 border border-green-700";
+                statusEl.innerText = `Pokédex Loaded (${pokedex.length})`;
+                
+            } catch (err) {
+                showMessage("Failed to parse pokedex.csv. Please ensure it matches the specified format.", true);
+            }
+        }
+
+        function populateDatalist() {
+            const datalist = document.getElementById('pokedexList');
+            datalist.innerHTML = '';
+            
+            pokedex.forEach(mon => {
+                if (mon.rawName) {
+                    let option = document.createElement('option');
+                    option.value = mon.rawName;
+                    datalist.appendChild(option);
+                }
+            });
+        }
+
+        // --- 2. Poképaste Parser ---
+        const natureMap = {
+            'Hardy': [1,1,1,1,1], 'Lonely': [1.1, 0.9, 1, 1, 1], 'Brave': [1.1, 1, 1, 1, 0.9], 'Adamant': [1.1, 1, 0.9, 1, 1], 'Naughty': [1.1, 1, 1, 0.9, 1],
+            'Bold': [0.9, 1.1, 1, 1, 1], 'Docile': [1,1,1,1,1], 'Relaxed': [1, 1.1, 1, 1, 0.9], 'Impish': [1, 1.1, 0.9, 1, 1], 'Lax': [1, 1.1, 1, 0.9, 1],
+            'Timid': [0.9, 1, 1, 1, 1.1], 'Hasty': [1, 0.9, 1, 1, 1.1], 'Serious': [1,1,1,1,1], 'Jolly': [1, 1, 0.9, 1, 1.1], 'Naive': [1, 1, 1, 0.9, 1.1],
+            'Modest': [0.9, 1, 1.1, 1, 1], 'Mild': [1, 0.9, 1.1, 1, 1], 'Quiet': [1, 1, 1.1, 1, 0.9], 'Bashful': [1,1,1,1,1], 'Rash': [1, 1, 1.1, 0.9, 1],
+            'Calm': [0.9, 1, 1, 1.1, 1], 'Gentle': [1, 0.9, 1, 1.1, 1], 'Sassy': [1, 1, 1, 1.1, 0.9], 'Careful': [1, 1, 0.9, 1.1, 1], 'Quirky': [1,1,1,1,1]
+        }; // Array order: Atk, Def, SpA, SpD, Spe
+
+        function importTeam() {
+            const pasteText = document.getElementById('pasteInput').value;
+            if (!pasteText.trim()) {
+                showMessage("Please paste a team first.", true);
+                return;
+            }
+
+            const blocks = pasteText.split('\n\n').filter(b => b.trim().length > 0);
+            userTeam = blocks.map(block => {
+                const lines = block.split('\n');
+                let mon = { 
+                    name: '', item: '', ability: '', nature: 'Serious',
+                    evs: { hp: 0, atk: 0, def: 0, spa: 0, spd: 0, spe: 0 },
+                    ivs: { hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31 }
+                };
+                
+                const firstLine = lines[0].split(' @ ');
+                mon.name = firstLine[0].replace(/\(M\)|\(F\)/g, '').trim();
+                if (firstLine[1]) mon.item = firstLine[1].trim();
+
+                lines.forEach(line => {
+                    const l = line.trim();
+                    if (l.startsWith('Ability:')) mon.ability = l.split(':')[1].trim();
+                    if (l.startsWith('EVs:')) {
+                        const evParts = l.split(':')[1].split(',');
+                        evParts.forEach(part => {
+                            const [val, statRaw] = part.trim().split(' ');
+                            let stat = statRaw.toLowerCase();
+                            if(stat === 'hp') mon.evs.hp = parseInt(val);
+                            if(stat === 'atk') mon.evs.atk = parseInt(val);
+                            if(stat === 'def') mon.evs.def = parseInt(val);
+                            if(stat === 'spa') mon.evs.spa = parseInt(val);
+                            if(stat === 'spd') mon.evs.spd = parseInt(val);
+                            if(stat === 'spe') mon.evs.spe = parseInt(val);
+                        });
+                    }
+                    if (l.endsWith('Nature')) mon.nature = l.split(' ')[0];
+                });
+                return mon;
+            });
+
+            updateTeamGrid();
+            showMessage(`Imported ${userTeam.length} Pokémon!`);
+        }
+
+        function updateTeamGrid() {
+            const slots = document.querySelectorAll('.pokemon-slot');
+            slots.forEach((slot, i) => {
+                if (userTeam[i]) {
+                    slot.innerText = userTeam[i].name + (userTeam[i].item ? `\n@ ${userTeam[i].item}` : '');
+                    slot.classList.replace('text-gray-500', 'text-gray-200');
+                    slot.classList.replace('border-gray-700', 'border-gray-500');
+                    slot.setAttribute('onclick', `selectUserMon(${i}, this)`);
+                } else {
+                    slot.innerText = `Slot ${i+1}`;
+                    slot.classList.replace('text-gray-200', 'text-gray-500');
+                    slot.classList.replace('border-gray-500', 'border-gray-700');
+                    slot.classList.remove('border-blue-500');
+                }
+            });
+        }
+
+        function selectUserMon(index, element) {
+            if(!userTeam[index]) return;
+            activeUserIndex = index;
+            document.querySelectorAll('.pokemon-slot').forEach(s => s.classList.remove('border-blue-500'));
+            element.classList.add('border-blue-500');
+            document.getElementById('activeUserMon').value = userTeam[index].name;
+        }
+
+        // --- 3. Stat Calculation ---
+        function calcStat(base, iv = 31, ev = 0, natureMod = 1, isHP = false, level = 100) {
+            if (isHP) return Math.floor(((2 * base + iv + Math.floor(ev / 4)) * level) / 100) + level + 10;
+            return Math.floor((Math.floor(((2 * base + iv + Math.floor(ev / 4)) * level) / 100) + 5) * natureMod);
+        }
+
+        // Function to resolve user's true stats
+        function calculateUserStats(mon) {
+            const normSearch = normalizeName(mon.name);
+            const baseStats = pokedex.find(p => p.searchKey1 === normSearch || p.searchKey2 === normSearch);
+            
+            if(!baseStats) return null;
+
+            const nMod = natureMap[mon.nature] || [1,1,1,1,1];
+            return {
+                hp: calcStat(baseStats.hp, mon.ivs.hp, mon.evs.hp, 1, true),
+                atk: calcStat(baseStats.atk, mon.ivs.atk, mon.evs.atk, nMod[0], false),
+                def: calcStat(baseStats.def, mon.ivs.def, mon.evs.def, nMod[1], false),
+                spa: calcStat(baseStats.spa, mon.ivs.spa, mon.evs.spa, nMod[2], false),
+                spd: calcStat(baseStats.spd, mon.ivs.spd, mon.evs.spd, nMod[3], false),
+                spe: calcStat(baseStats.spe, mon.ivs.spe, mon.evs.spe, nMod[4], false),
+            };
+        }
+
+
+        // --- 4. The Optimized Reverse Calc Algorithm ---
+        function runReverseCalc() {
+            if (pokedex.length === 0) {
+                showMessage("Pokédex has not loaded yet or is missing.", true);
+                return;
+            }
+            if (activeUserIndex === null) {
+                showMessage("Please import a team and select your active Pokémon.", true);
+                return;
+            }
+
+            const opponentRawName = document.getElementById('opponentInput').value;
+            const normOpponent = normalizeName(opponentRawName);
+            const oppBaseStats = pokedex.find(p => p.searchKey1 === normOpponent || p.searchKey2 === normOpponent);
+            
+            if (!oppBaseStats) {
+                showMessage("Opponent not found. Check spelling.", true);
+                return;
+            }
+
+            const userMon = userTeam[activeUserIndex];
+            const userStats = calculateUserStats(userMon);
+            if(!userStats) {
+                showMessage(`Could not find base stats for your ${userMon.name}. Check the name.`, true);
+                return;
+            }
+
+            const role = document.getElementById('roleSelect').value;
+            const power = parseFloat(document.getElementById('movePower').value);
+            const M = parseFloat(document.getElementById('multiplier').value);
+            const targetPct = parseFloat(document.getElementById('damageSeen').value);
+            const resultsDiv = document.getElementById('results');
+
+            if(isNaN(power) || isNaN(M) || isNaN(targetPct)) {
+                showMessage("Please ensure Move Power, Modifiers, and Damage Seen are valid numbers.", true);
+                return;
+            }
+
+            resultsDiv.innerText = `Calculating exact bounds for ${oppBaseStats.rawName}...\n\n`;
+            
+            const LEVEL = 100;
+            const Lf = Math.floor((2 * LEVEL) / 5) + 2; // Usually 42 at lvl 100
+            let validSpreads = [];
+
+            // SCENARIO 1: USER IS ATTACKING
+            if (role.startsWith('attacking')) {
+                const isPhysical = role.includes('physical');
+                const A = isPhysical ? userStats.atk : userStats.spa;
+                const oppBaseHp = oppBaseStats.hp;
+                const oppBaseDefStat = isPhysical ? oppBaseStats.def : oppBaseStats.spd;
+                
+                const K = Math.floor((Lf * power * A) / 50);
+
+                for (let hpEV = 0; hpEV <= 252; hpEV += 4) {
+                    for (let defEV = 0; defEV <= 252; defEV += 4) {
+                        for (let natureMod of [0.9, 1.0, 1.1]) {
+                            const oppHp = calcStat(oppBaseHp, 31, hpEV, 1, true, LEVEL);
+                            const oppDef = calcStat(oppBaseDefStat, 31, defEV, natureMod, false, LEVEL);
+
+                            const baseDmg = Math.floor(K / oppDef) + 2;
+                            const minDmg = Math.floor(Math.floor(baseDmg * 0.85) * M);
+                            const maxDmg = Math.floor(baseDmg * M);
+
+                            const minPct = (minDmg / oppHp) * 100;
+                            const maxPct = (maxDmg / oppHp) * 100;
+
+                            if (targetPct >= Math.floor(minPct) - 1 && targetPct <= Math.ceil(maxPct) + 1) {
+                                validSpreads.push({ hpEV, defEV, oppHp, oppDef, natureMod });
+                            }
+                        }
+                    }
+                }
+
+                if(validSpreads.length === 0) {
+                    resultsDiv.innerText += "No valid EV combinations found. Check your modifiers (did Intimidate trigger?), base power, or damage percentage.";
+                } else {
+                    const minHp = Math.min(...validSpreads.map(s => s.oppHp));
+                    const maxHp = Math.max(...validSpreads.map(s => s.oppHp));
+                    const minDef = Math.min(...validSpreads.map(s => s.oppDef));
+                    const maxDef = Math.max(...validSpreads.map(s => s.oppDef));
+                    
+                    const statName = isPhysical ? "Defense" : "Sp. Defense";
+                    resultsDiv.innerText += `[ MATCH FOUND - OPPONENT DEFENSIVE BULK ]\n`;
+                    resultsDiv.innerText += `-> HP Bounds: ${minHp} to ${maxHp}\n`;
+                    resultsDiv.innerText += `-> ${statName} Bounds: ${minDef} to ${maxDef}\n\n`;
+                    
+                    resultsDiv.innerText += `Likely EV Ranges:\n`;
+                    const minHpEv = Math.min(...validSpreads.map(s => s.hpEV));
+                    const maxHpEv = Math.max(...validSpreads.map(s => s.hpEV));
+                    const minDefEv = Math.min(...validSpreads.map(s => s.defEV));
+                    const maxDefEv = Math.max(...validSpreads.map(s => s.defEV));
+                    
+                    resultsDiv.innerText += `HP EVs: ${minHpEv} - ${maxHpEv}\n`;
+                    resultsDiv.innerText += `${statName} EVs: ${minDefEv} - ${maxDefEv}\n`;
+                }
+            } 
+            
+            // SCENARIO 2: USER IS DEFENDING
+            else if (role.startsWith('defending')) {
+                const isPhysical = role.includes('physical');
+                const myHp = userStats.hp;
+                const myDef = isPhysical ? userStats.def : userStats.spd;
+                const oppBaseAtkStat = isPhysical ? oppBaseStats.atk : oppBaseStats.spa;
+
+                const minRawDmgTaken = Math.ceil(myHp * ((targetPct - 1) / 100));
+                const maxRawDmgTaken = Math.floor(myHp * ((targetPct + 1) / 100));
+
+                for (let atkEV = 0; atkEV <= 252; atkEV += 4) {
+                    for (let natureMod of [0.9, 1.0, 1.1]) {
+                        const oppAtk = calcStat(oppBaseAtkStat, 31, atkEV, natureMod, false, LEVEL);
+                        
+                        const K = Math.floor((Lf * power * oppAtk) / 50);
+                        const baseDmg = Math.floor(K / myDef) + 2;
+                        
+                        const minGeneratedDmg = Math.floor(Math.floor(baseDmg * 0.85) * M);
+                        const maxGeneratedDmg = Math.floor(baseDmg * M);
+
+                        if (maxGeneratedDmg >= minRawDmgTaken && minGeneratedDmg <= maxRawDmgTaken) {
+                            validSpreads.push({ atkEV, oppAtk, natureMod });
+                        }
+                    }
+                }
+
+                if(validSpreads.length === 0) {
+                    resultsDiv.innerText += "No valid EV combinations found. Check modifiers, or ensure the opponent isn't holding a Choice Band/Specs.";
+                } else {
+                    const minAtk = Math.min(...validSpreads.map(s => s.oppAtk));
+                    const maxAtk = Math.max(...validSpreads.map(s => s.oppAtk));
+                    const minAtkEv = Math.min(...validSpreads.map(s => s.atkEV));
+                    const maxAtkEv = Math.max(...validSpreads.map(s => s.atkEV));
+                    const statName = isPhysical ? "Attack" : "Sp. Attack";
+
+                    resultsDiv.innerText += `[ MATCH FOUND - OPPONENT OFFENSIVE STAT ]\n`;
+                    resultsDiv.innerText += `-> ${statName} Bounds: ${minAtk} to ${maxAtk}\n\n`;
+                    resultsDiv.innerText += `Likely EV Ranges:\n`;
+                    resultsDiv.innerText += `${statName} EVs: ${minAtkEv} - ${maxAtkEv}\n`;
+                }
+            }
+        }
+    </script>
+</body>
+</html>
